@@ -751,10 +751,10 @@
       if (b.dataset.move) { const ids = [...picked]; return moveSheet(ids, null); }
       if (b.dataset.pickall) { sh.querySelectorAll('[data-pickid]').forEach((r) => { picked.add(r.dataset.pickid); r.classList.add('sel'); }); return updateDock(picked, $('.pickdock', sh)); }
       if (b.dataset.scope) { scope = b.dataset.scope; subF = null; }
-      const fab = $('.fab', sh); if (fab) fab.dataset.sub = '';
-      else if (b.dataset.subf !== undefined) { subF = b.dataset.subf === '__all' || subF === b.dataset.subf ? null : b.dataset.subf; const fab = $('.fab', sh); if (fab) fab.dataset.sub = subF || ''; }
+      else if (b.dataset.subf !== undefined) subF = b.dataset.subf === '__all' || subF === b.dataset.subf ? null : b.dataset.subf;
       else if (b.dataset.pick) { picking = true; picked.clear(); }
       else if (b.dataset.pickcancel) { picking = false; picked.clear(); }
+      const fab = $('.fab', sh); if (fab) fab.dataset.sub = subF || ''; // + adds into the subcategory in view
       redraw();
     });
   }
