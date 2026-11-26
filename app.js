@@ -90,6 +90,7 @@
         if (action === 'applyRule' || p.apply) db.expenses.forEach((e) => { if (e.type !== 'payment' && e.title.toLowerCase().includes(rule.match.toLowerCase()) && e.category_id !== rule.category_id) { e.category_id = rule.category_id; n++; } });
         info.changed = n;
       } else if (action === 'deleteRule') db.rules = db.rules.filter((r) => r.id !== p.id);
+      else if (action === 'changePin') { CFG.mockPin = p.pin; }
       else if (action === 'bulkUpdate') { let n = 0; db.expenses.forEach((e) => { if (p.ids.includes(e.id)) { if (p.category_id) e.category_id = p.category_id; if (p.sub !== undefined) e.sub = p.sub; n++; } }); info.changed = n; }
       else if (action === 'setSub') { let n = 0; db.expenses.forEach((e) => { if (p.ids.includes(e.id)) { e.sub = p.sub; n++; } }); info.changed = n; }
       else if (action === 'renameSub') { let n = 0; db.expenses.forEach((e) => { if (e.category_id === p.category_id && e.sub === p.from) { e.sub = p.to; n++; } }); info.changed = n; }
@@ -451,6 +452,7 @@
       <div class="section-t">Data</div>
       <div class="list">
         <button data-act="export"><span class="grow">Download all expenses (CSV)<small>Opens in Excel or Google Sheets. Good as a monthly backup.</small></span></button>
+        <button data-act="changepin"><span class="grow">Change PIN<small>Both phones use the same PIN. The other phone will ask for the new one once.</small></span><span class="chev">${I.right}</span></button>
         <button data-act="refresh"><span class="grow">Refresh now</span></button>
         <button data-act="logout"><span class="grow" style="color:var(--bad)">Sign out of this phone</span></button>
       </div>
@@ -868,6 +870,22 @@
     setTimeout(() => inp.focus(), 250);
   }
 
+  function pinSheet() {
+    const sh = openSheet(`${head('Change PIN')}
+      <p class="sub" style="margin:0 4px 14px">This phone stays signed in. Grace’s phone will ask for the new PIN the next time it opens.</p>
+      <div class="field"><label for="p1">New PIN (4 to 8 digits)</label><input id="p1" class="num" inputmode="numeric" maxlength="8" autocomplete="off"></div>
+      <div class="field"><label for="p2">Type it again</label><input id="p2" class="num" inputmode="numeric" maxlength="8" autocomplete="off"></div>
+      <div class="err" id="p-err"></div>
+      <div class="actions"><button class="btn" id="p-save">Change PIN</button></div>`);
+    $('#p-save', sh).addEventListener('click', async () => {
+      const a = $('#p1', sh).value.trim(), b = $('#p2', sh).value.trim(), err = $('#p-err', sh);
+      if (!/^[0-9]{4,8}$/.test(a)) { err.textContent = 'Use 4 to 8 digits.'; return; }
+      if (a !== b) { err.textContent = 'The two PINs don’t match.'; return; }
+      try { await mutate('changePin', {pin: a}); S.pin = a; LS.set('pin', a); closeSheet(); toast('PIN changed'); }
+      catch (x) { err.textContent = x.message; }
+    });
+  }
+
   function monthPicker() {
     const ms = [...D.months].reverse();
     openSheet(`${head('Choose a month')}<div class="list">${ms.map((m) => `<button data-act="setmonth" data-m="${m}" data-close="1"><span class="grow">${mLong(m)}<small>${D.byMonth[m].count} expenses</small></span><span class="num">${money(D.byMonth[m].total)}</span></button>`).join('')}</div>`);
@@ -949,6 +967,7 @@
     if (a === 'delrule') { try { await mutate('deleteRule', {id: el.dataset.id}); toast('Rule removed'); render(); } catch (x) { toast(x.message); } return; }
     if (a === 'export') return exportCSV();
     if (a === 'refresh') return refresh();
+    if (a === 'changepin') return pinSheet();
     if (a === 'logout') { LS.del('pin'); LS.del('data'); S.pin = ''; S.data = null; render(); return; }
     if (a === 'pickme') { S.me = el.dataset.v; document.querySelectorAll('[data-act="pickme"]').forEach((b) => b.classList.toggle('on', b === el)); return; }
     if (a === 'login') {
