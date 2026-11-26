@@ -1,3 +1,4 @@
+[hidden] { display: none !important; }
 :root {
   --paper: #EEF1EE;
   --surface: #FFFFFF;
@@ -306,3 +307,12 @@ button { cursor: pointer; }
 .pickdock .btn { padding: 10px 14px; }
 .pickdock .btn:not(.ghost) { background: var(--paper); color: var(--ink); }
 .day .linkbtn { font-size: 13px; }
+
+/* add button inside sheets */
+.fab { position: sticky; bottom: calc(var(--safe-b) + 8px); margin: 14px 0 0 auto; display: grid; place-items: center; width: 56px; height: 56px; border-radius: 50%; border: 0; background: var(--cedar); color: var(--on-cedar); box-shadow: 0 6px 18px rgba(47, 93, 80, .35); z-index: 6; }
+.fab svg { width: 28px; height: 28px; }
+.sheet:has(.pickdock) .fab { display: none; }
+/* category finder */
+.catq { margin-bottom: 8px; }
+.catq input { padding: 11px 0; }
+.sugg b { font-weight: 600; }

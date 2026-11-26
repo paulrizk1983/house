@@ -64,6 +64,32 @@
   function check(j) { if (!j.ok) { const e = new Error(j.error || 'Something went wrong.'); e.pin = /PIN/i.test(j.error || ''); throw e; } return j; }
 
   // Local stand-in for the Google script, used for testing (config api: "mock").
+  // Apply one change to a copy of the data. Same rules as the Google script.
+  function applyAction(db, action, p, user) {
+    const id = () => p._tmp || Math.random().toString(36).slice(2, 10), info = {};
+      const ex = (i) => { const e = db.expenses.find((x) => x.id === i); if (!e) throw new Error('Item not found.'); return e; };
+      if (action === 'addExpense') db.expenses.push({...(({_tmp, ...q}) => q)(p), id: p._tmp || 'e' + id(), type: 'expense', month: p.date.slice(0, 7), created_by: user, created_at: new Date().toISOString()});
+      else if (action === 'updateExpense') { const {_tmp, ...q} = p; Object.assign(ex(p.id), {...q, month: p.date.slice(0, 7)}); }
+      else if (action === 'deleteExpense') db.expenses = db.expenses.filter((x) => x.id !== p.id);
+      else if (action === 'addPayment') db.expenses.push({id: p._tmp || 'p' + id(), date: p.date, month: p.date.slice(0, 7), title: 'Payment ' + p.from + ' → ' + p.to, amount: r2(p.amount), category_id: '', paid_by: p.from, grace_share: p.to === 'Grace' ? r2(p.amount) : 0, paul_share: p.to === 'Paul' ? r2(p.amount) : 0, type: 'payment', note: '', created_by: user});
+      else if (action === 'addCategory') db.categories.push({id: p._tmp || 'c' + id(), name: p.name, emoji: p.emoji, color: p.color, sort: db.categories.length + 1, archived: false});
+      else if (action === 'updateCategory') { const {_tmp, ...q} = p; Object.assign(db.categories.find((c) => c.id === p.id), q); }
+      else if (action === 'mergeCategory') { let n = 0; db.expenses.forEach((e) => { if (e.category_id === p.from) { e.category_id = p.to; n++; } }); db.categories.find((c) => c.id === p.from).archived = true; info.changed = n; }
+      else if (action === 'addRule' || action === 'applyRule') {
+        let rule = p;
+        if (action === 'addRule') { rule = {id: p._tmp || 'r' + id(), match: p.match, category_id: p.category_id}; db.rules.push(rule); } else rule = db.rules.find((r) => r.id === p.id);
+        let n = 0;
+        if (action === 'applyRule' || p.apply) db.expenses.forEach((e) => { if (e.type !== 'payment' && e.title.toLowerCase().includes(rule.match.toLowerCase()) && e.category_id !== rule.category_id) { e.category_id = rule.category_id; n++; } });
+        info.changed = n;
+      } else if (action === 'deleteRule') db.rules = db.rules.filter((r) => r.id !== p.id);
+      else if (action === 'bulkUpdate') { let n = 0; db.expenses.forEach((e) => { if (p.ids.includes(e.id)) { if (p.category_id) e.category_id = p.category_id; if (p.sub !== undefined) e.sub = p.sub; n++; } }); info.changed = n; }
+      else if (action === 'setSub') { let n = 0; db.expenses.forEach((e) => { if (p.ids.includes(e.id)) { e.sub = p.sub; n++; } }); info.changed = n; }
+      else if (action === 'renameSub') { let n = 0; db.expenses.forEach((e) => { if (e.category_id === p.category_id && e.sub === p.from) { e.sub = p.to; n++; } }); info.changed = n; }
+      if (NEW_ID[action]) { const list = action === 'addCategory' ? db.categories : action === 'addRule' ? db.rules : db.expenses; info.id = list[list.length - 1].id; }
+      return info;
+  }
+  const NEW_ID = {addExpense: 1, addPayment: 1, addCategory: 1, addRule: 1};
+
   const Mock = {
     db: null,
     async init() {
@@ -74,29 +100,11 @@
     async snapshot() { await this.init(); if (S.pin !== (CFG.mockPin || '000000')) throw Object.assign(new Error('Wrong PIN.'), {pin: true}); return JSON.parse(JSON.stringify({ok: true, ...this.db})); },
     async post(action, p, user) {
       await this.init();
-      const db = this.db, id = () => Math.random().toString(36).slice(2, 10), info = {};
-      const ex = (i) => { const e = db.expenses.find((x) => x.id === i); if (!e) throw new Error('Item not found.'); return e; };
-      if (action === 'addExpense') db.expenses.push({...p, id: 'e' + id(), type: 'expense', month: p.date.slice(0, 7), created_by: user, created_at: new Date().toISOString()});
-      else if (action === 'updateExpense') Object.assign(ex(p.id), {...p, month: p.date.slice(0, 7)});
-      else if (action === 'deleteExpense') db.expenses = db.expenses.filter((x) => x.id !== p.id);
-      else if (action === 'addPayment') db.expenses.push({id: 'p' + id(), date: p.date, month: p.date.slice(0, 7), title: 'Payment ' + p.from + ' → ' + p.to, amount: r2(p.amount), category_id: '', paid_by: p.from, grace_share: p.to === 'Grace' ? r2(p.amount) : 0, paul_share: p.to === 'Paul' ? r2(p.amount) : 0, type: 'payment', note: '', created_by: user});
-      else if (action === 'addCategory') db.categories.push({id: 'c' + id(), name: p.name, emoji: p.emoji, color: p.color, sort: db.categories.length + 1, archived: false});
-      else if (action === 'updateCategory') Object.assign(db.categories.find((c) => c.id === p.id), p);
-      else if (action === 'mergeCategory') { let n = 0; db.expenses.forEach((e) => { if (e.category_id === p.from) { e.category_id = p.to; n++; } }); db.categories.find((c) => c.id === p.from).archived = true; info.changed = n; }
-      else if (action === 'addRule' || action === 'applyRule') {
-        let rule = p;
-        if (action === 'addRule') { rule = {id: 'r' + id(), match: p.match, category_id: p.category_id}; db.rules.push(rule); } else rule = db.rules.find((r) => r.id === p.id);
-        let n = 0;
-        if (action === 'applyRule' || p.apply) db.expenses.forEach((e) => { if (e.type !== 'payment' && e.title.toLowerCase().includes(rule.match.toLowerCase()) && e.category_id !== rule.category_id) { e.category_id = rule.category_id; n++; } });
-        info.changed = n;
-      } else if (action === 'deleteRule') db.rules = db.rules.filter((r) => r.id !== p.id);
-      else if (action === 'changePin') { CFG.mockPin = p.pin; }
-      else if (action === 'bulkUpdate') { let n = 0; db.expenses.forEach((e) => { if (p.ids.includes(e.id)) { if (p.category_id) e.category_id = p.category_id; if (p.sub !== undefined) e.sub = p.sub; n++; } }); info.changed = n; }
-      else if (action === 'setSub') { let n = 0; db.expenses.forEach((e) => { if (p.ids.includes(e.id)) { e.sub = p.sub; n++; } }); info.changed = n; }
-      else if (action === 'renameSub') { let n = 0; db.expenses.forEach((e) => { if (e.category_id === p.category_id && e.sub === p.from) { e.sub = p.to; n++; } }); info.changed = n; }
+      if (action === 'changePin') CFG.mockPin = p.pin;
+      const info = applyAction(this.db, action, p, user);
       this.save();
       await new Promise((r) => setTimeout(r, 250));
-      return {ok: true, ...JSON.parse(JSON.stringify(db)), info};
+      return {ok: true, ...JSON.parse(JSON.stringify(this.db)), info};
     },
   };
 
@@ -208,7 +216,7 @@
   const modeSeg = () => `<div class="seg" style="margin-bottom:18px" role="tablist">
       <button data-act="hmode" data-v="month" class="${S.hmode !== 'compare' ? 'on' : ''}" role="tab">One month</button>
       <button data-act="hmode" data-v="compare" class="${S.hmode === 'compare' ? 'on' : ''}" role="tab">Compare months</button></div>`;
-  const syncLine = () => `<div class="sync">${S.busy ? '<span class="spin"></span> Syncing' : 'Pull down or tap to refresh · ' + (S.data.at ? 'updated ' + new Date(S.data.at).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'}) : '')}</div>`;
+  const syncLine = () => `<div class="sync">${syncText()}</div>`;
 
   function viewHome() {
     if (S.hmode === 'compare') return viewCompare();
@@ -476,30 +484,66 @@
 
   // ---------------- sheets ----------------
   function openSheet(html, onMount) {
-    closeSheet(true);
+    const had = !!$('.sheet');
+    removeSheet();
+    if (!had) history.pushState({tab: S.tab, sheet: 1}, '');
     const scrim = document.createElement('div'); scrim.className = 'scrim'; scrim.dataset.act = 'close';
     const sh = document.createElement('div'); sh.className = 'sheet'; sh.setAttribute('role', 'dialog'); sh.setAttribute('aria-modal', 'true');
     sh.innerHTML = '<div class="grab"></div>' + html;
     document.body.append(scrim, sh);
     requestAnimationFrame(() => { scrim.classList.add('open'); sh.classList.add('open'); });
     document.body.style.overflow = 'hidden';
+    dragToClose(sh);
     if (onMount) onMount(sh);
     return sh;
   }
-  function closeSheet(instant) {
+  function removeSheet() { document.querySelectorAll('.sheet, .scrim').forEach((x) => x.remove()); document.body.style.overflow = ''; }
+  // Closing goes through history, so the phone's back button and back swipe close sheets too
+  function closeSheet() {
+    if (!$('.sheet')) return;
+    if (history.state && history.state.sheet) history.back(); else animateClose();
+  }
+  function animateClose() {
     const sh = $('.sheet'), sc = $('.scrim');
     if (!sh) return;
     document.body.style.overflow = '';
-    if (instant) { sh.remove(); sc && sc.remove(); return; }
-    sh.classList.remove('open'); sc && sc.classList.remove('open');
+    sh.style.transform = ''; sh.classList.remove('open'); sc && sc.classList.remove('open');
     setTimeout(() => { sh.remove(); sc && sc.remove(); }, 260);
+  }
+  window.addEventListener('popstate', (ev) => {
+    if ($('.sheet')) { animateClose(); return; }
+    const t = (ev.state && ev.state.tab) || 'home';
+    if (t !== S.tab) { S.tab = t; S.picking = false; S.picked = new Set(); render(); window.scrollTo(0, 0); }
+  });
+  // Pull a sheet down (from its top) or swipe it to the right to close it
+  function dragToClose(sh) {
+    let x0 = 0, y0 = 0, mode = null;
+    sh.addEventListener('touchstart', (e) => { const t = e.touches[0]; x0 = t.clientX; y0 = t.clientY; mode = null; }, {passive: true});
+    sh.addEventListener('touchmove', (e) => {
+      const t = e.touches[0], dx = t.clientX - x0, dy = t.clientY - y0;
+      if (!mode) {
+        if (dy > 8 && Math.abs(dy) > Math.abs(dx) && sh.scrollTop <= 0 && !e.target.closest('.chips, .heat, .cmp-scroll')) mode = 'down';
+        else if (dx > 8 && Math.abs(dx) > Math.abs(dy) * 1.5 && !e.target.closest('.chips, .heat, .cmp-scroll, input')) mode = 'right';
+        else if (Math.abs(dx) > 8 || Math.abs(dy) > 8) mode = 'none';
+      }
+      if (mode === 'down') { sh.style.transition = 'none'; sh.style.transform = `translateY(${Math.max(0, dy)}px)`; }
+      if (mode === 'right') { sh.style.transition = 'none'; sh.style.transform = `translateX(${Math.max(0, dx)}px)`; }
+    }, {passive: true});
+    sh.addEventListener('touchend', (e) => {
+      const t = e.changedTouches[0], dx = t.clientX - x0, dy = t.clientY - y0;
+      sh.style.transition = '';
+      if ((mode === 'down' && dy > 90) || (mode === 'right' && dx > 90)) closeSheet();
+      else sh.style.transform = '';
+      mode = null;
+    }, {passive: true});
   }
   const head = (t) => `<div class="sheet-head"><h2>${t}</h2><button class="x" data-act="close" aria-label="Close">${I.x}</button></div>`;
 
   // Add / edit expense
-  function expenseForm(e) {
+  function expenseForm(e, preset) {
     const isNew = !e;
-    const f = e ? {...e} : {amount: '', title: '', category_id: '', paid_by: S.me, date: todayISO(), split: 'equal', grace_share: 0, paul_share: 0, note: ''};
+    const f = e ? {...e} : {amount: '', title: '', category_id: '', paid_by: S.me, date: todayISO(), split: 'equal', grace_share: 0, paul_share: 0, note: '', sub: '', ...(preset || {})};
+    if (preset && preset.category_id) f.touchedCat = true;
     if (e) f.split = !e.grace_share ? 'Paul' : !e.paul_share ? 'Grace' : Math.abs(e.grace_share - e.paul_share) < .011 ? 'equal' : 'custom';
     const cats = activeCats();
     const sh = openSheet(`${head(isNew ? 'New expense' : 'Edit expense')}
@@ -507,7 +551,8 @@
       <div class="field"><label for="f-title">What was it?</label><input id="f-title" placeholder="e.g. Spinneys, Fuel, Generator" value="${esc(f.title)}" autocomplete="off"></div>
       <div class="sugg" id="f-sugg"></div>
       <div class="lbl"><span>Category</span></div>
-      <div class="catgrid more-hidden" id="f-cats">${cats.map((c, i) => `<button type="button" data-cat="${c.id}" class="${f.category_id === c.id ? 'on' : ''} ${i >= 8 && f.category_id !== c.id ? 'extra' : ''}"><span class="e">${c.emoji}</span><span>${esc(c.name)}</span></button>`).join('')}</div>
+      ${catSearchBox('f')}
+      <div class="catgrid more-hidden" id="f-cats">${cats.map((c, i) => `<button type="button" data-cat="${c.id}" data-name="${esc(c.name.toLowerCase())}" class="${f.category_id === c.id ? 'on' : ''} ${i >= 8 && f.category_id !== c.id ? 'extra' : ''}"><span class="e">${c.emoji}</span><span>${esc(c.name)}</span></button>`).join('')}</div>
       ${cats.length > 8 ? `<button type="button" class="morecats" id="f-more">Show all ${cats.length} categories</button>` : ''}
       <div class="lbl"><span>Subcategory <small>(optional)</small></span></div>
       <div class="field"><input id="f-sub" placeholder="e.g. Zanzibar, Kids’ restaurants" value="${esc(f.sub || '')}" autocomplete="off" aria-label="Subcategory"></div>
@@ -536,10 +581,11 @@
     const setSeg = (id, v) => sh.querySelectorAll(`#${id} button`).forEach((b) => b.classList.toggle('on', b.dataset.v === v));
     const showSubs = () => {
       const box = $('#f-subs', sh), cur = $('#f-sub', sh).value.trim().toLowerCase();
-      const subs = f.category_id ? subsOf(f.category_id).filter((s) => s.sub.toLowerCase() !== cur) : [];
+      const subs = f.category_id ? subsOf(f.category_id).filter((s) => s.sub.toLowerCase() !== cur && (!cur || s.sub.toLowerCase().includes(cur))) : [];
       box.innerHTML = subs.slice(0, 8).map((s) => `<button type="button" data-sub="${esc(s.sub)}">${esc(s.sub)}</button>`).join('');
     };
     const pickCat = (id) => { f.category_id = id; sh.querySelectorAll('#f-cats button').forEach((b) => { b.classList.toggle('on', b.dataset.cat === id); if (b.dataset.cat === id) b.classList.remove('extra'); }); showSubs(); };
+    wireCatSearch(sh, 'f', (cid, sub) => { f.touchedCat = true; pickCat(cid); if (sub !== undefined) $('#f-sub', sh).value = sub; showSubs(); });
     $('#f-subs', sh).addEventListener('click', (ev) => { const b = ev.target.closest('button'); if (b) { $('#f-sub', sh).value = b.dataset.sub; showSubs(); } });
     $('#f-sub', sh).addEventListener('input', showSubs);
     const more = $('#f-more', sh);
@@ -696,7 +742,7 @@
     };
     let first = true;
     const redraw = () => { const st = sh.scrollTop; draw(sh); sh.scrollTop = st; };
-    const sh = openSheet(`${head(`${c.emoji} ${esc(c.name)}`)}<div id="c-body"></div>`);
+    const sh = openSheet(`${head(`${c.emoji} ${esc(c.name)}`)}<div id="c-body"></div><button class="fab" data-act="addin" data-cat="${esc(cid)}" aria-label="Add expense in ${esc(c.name)}">${I.plus}</button>`);
     sh.classList.add('tall');
     draw(sh);
     sh.addEventListener('click', (ev) => {
@@ -705,7 +751,8 @@
       if (b.dataset.move) { const ids = [...picked]; return moveSheet(ids, null); }
       if (b.dataset.pickall) { sh.querySelectorAll('[data-pickid]').forEach((r) => { picked.add(r.dataset.pickid); r.classList.add('sel'); }); return updateDock(picked, $('.pickdock', sh)); }
       if (b.dataset.scope) { scope = b.dataset.scope; subF = null; }
-      else if (b.dataset.subf !== undefined) subF = b.dataset.subf === '__all' || subF === b.dataset.subf ? null : b.dataset.subf;
+      const fab = $('.fab', sh); if (fab) fab.dataset.sub = '';
+      else if (b.dataset.subf !== undefined) { subF = b.dataset.subf === '__all' || subF === b.dataset.subf ? null : b.dataset.subf; const fab = $('.fab', sh); if (fab) fab.dataset.sub = subF || ''; }
       else if (b.dataset.pick) { picking = true; picked.clear(); }
       else if (b.dataset.pickcancel) { picking = false; picked.clear(); }
       redraw();
@@ -784,6 +831,25 @@
     $('#u-apply', sh).addEventListener('click', () => save(true));
   }
 
+  // ----- type to find a category or subcategory -----
+  const catSearchBox = (k) => `<label class="search catq">${I.search}<input type="search" id="${k}-catq" placeholder="Type to find a category or subcategory" autocomplete="off" aria-label="Find a category"></label><div class="sugg" id="${k}-subhits"></div>`;
+  function wireCatSearch(sh, k, onPick) {
+    const inp = $(`#${k}-catq`, sh), grid = $(`#${k}-cats`, sh), hits = $(`#${k}-subhits`, sh), more = $(`#${k}-more`, sh);
+    inp.addEventListener('input', () => {
+      const q = inp.value.trim().toLowerCase();
+      if (q) { grid.classList.remove('more-hidden'); if (more) more.hidden = true; }
+      grid.querySelectorAll('button').forEach((b) => { b.hidden = !!q && !(b.dataset.name || '').includes(q); });
+      // subcategories from any category
+      const found = [];
+      if (q) S.data.categories.filter((c) => !c.archived).forEach((c) => subsOf(c.id).forEach((s) => { if (s.sub.toLowerCase().includes(q)) found.push({c, sub: s.sub}); }));
+      hits.innerHTML = found.slice(0, 8).map((x) => `<button type="button" data-cat="${x.c.id}" data-sub="${esc(x.sub)}">${x.c.emoji} ${esc(x.c.name)} › <b>${esc(x.sub)}</b></button>`).join('')
+        + (q && !found.length && !grid.querySelector('button:not([hidden])') ? '<span class="hint">No match. Add a category in Settings.</span>' : '');
+    });
+    const done = () => { inp.value = ''; inp.dispatchEvent(new Event('input')); };
+    hits.addEventListener('click', (ev) => { const b = ev.target.closest('button'); if (b) { onPick(b.dataset.cat, b.dataset.sub); done(); } });
+    grid.addEventListener('click', (ev) => { if (inp.value && ev.target.closest('button')) setTimeout(done, 0); });
+  }
+
   // ----- multi-select: move expenses to a category and/or subcategory -----
   const pickRow = (e, on) => { const c = cat(e.category_id); return `<button class="xrow pick ${on ? 'sel' : ''}" data-pickid="${esc(e.id)}" aria-pressed="${on}"><span class="ico chk" aria-hidden="true"></span><span style="min-width:0"><div class="t">${esc(e.title)}</div><div class="m"><span class="when">${dayLabel(e.date)}</span><span>${c.emoji} ${catLabel(e)}</span></div></span><span><div class="a num">${money(e.amount)}</div></span></button>`; };
   // Toggle one row in place, so the screen never jumps.
@@ -809,7 +875,8 @@
     const sh = openSheet(`${head(`Move ${es.length} expense${es.length === 1 ? '' : 's'}`)}
       <p class="sub" style="margin:0 4px 12px">Currently in ${curCats.length === 1 ? cat(curCats[0]).emoji + ' ' + esc(cat(curCats[0]).name) : curCats.length + ' categories'} · ${money(es.reduce((s, e) => s + e.amount, 0))}</p>
       <div class="lbl"><span>Category</span></div>
-      <div class="catgrid more-hidden" id="m-cats"><button type="button" data-cat="" class="on"><span class="e">↩︎</span><span>Keep as is</span></button>${cats.map((c, i) => `<button type="button" data-cat="${c.id}" class="${i >= 11 ? 'extra' : ''}"><span class="e">${c.emoji}</span><span>${esc(c.name)}</span></button>`).join('')}</div>
+      ${catSearchBox('m')}
+      <div class="catgrid more-hidden" id="m-cats"><button type="button" data-cat="" data-name="" class="on"><span class="e">↩︎</span><span>Keep as is</span></button>${cats.map((c, i) => `<button type="button" data-cat="${c.id}" data-name="${esc(c.name.toLowerCase())}" class="${i >= 11 ? 'extra' : ''}"><span class="e">${c.emoji}</span><span>${esc(c.name)}</span></button>`).join('')}</div>
       ${cats.length > 11 ? `<button type="button" class="morecats" id="m-more">Show all ${cats.length} categories</button>` : ''}
       <div class="lbl"><span>Subcategory</span></div>
       <div class="field"><input id="m-sub" placeholder="e.g. Zanzibar — leave empty for none" autocomplete="off" aria-label="Subcategory"></div>
@@ -823,6 +890,7 @@
       $('#m-subs', sh).innerHTML = Object.entries(n).sort((a, b) => b[1] - a[1]).slice(0, 10).map(([s]) => `<button type="button" data-sub="${esc(s)}">${esc(s)}</button>`).join('');
     };
     subs();
+    wireCatSearch(sh, 'm', (cid, sub) => { target = cid; sh.querySelectorAll('#m-cats button').forEach((x) => x.classList.toggle('on', x.dataset.cat === cid)); if (sub !== undefined) $('#m-sub', sh).value = sub; subs(); });
     const mm = $('#m-more', sh); if (mm) mm.addEventListener('click', () => { $('#m-cats', sh).classList.remove('more-hidden'); mm.remove(); });
     $('#m-cats', sh).addEventListener('click', (ev) => { const b = ev.target.closest('button'); if (!b) return; target = b.dataset.cat; sh.querySelectorAll('#m-cats button').forEach((x) => x.classList.toggle('on', x === b)); subs(); });
     $('#m-subs', sh).addEventListener('click', (ev) => { const b = ev.target.closest('button'); if (b) $('#m-sub', sh).value = b.dataset.sub; });
@@ -842,7 +910,7 @@
   }
 
   function searchSheet() {
-    const sh = openSheet(`${head('Search')}<label class="search">${I.search}<input type="search" id="q-in" placeholder="Name, category, note, amount or date" autocomplete="off" aria-label="Search all expenses"></label><div id="q-out"></div>`);
+    const sh = openSheet(`${head('Search')}<label class="search">${I.search}<input type="search" id="q-in" placeholder="Name, category, note, amount or date" autocomplete="off" aria-label="Search all expenses"></label><div id="q-out"></div><button class="fab" data-act="addin" aria-label="Add expense">${I.plus}</button>`);
     sh.classList.add('tall');
     const inp = $('#q-in', sh), out = $('#q-out', sh);
     const run = () => {
@@ -892,17 +960,66 @@
   }
 
   // ---------------- data flow ----------------
+  // Changes show at once; they are sent to the Google Sheet in the background, in order.
+  // If the phone is offline they wait and are sent when it is back online.
+  const Q = {jobs: LS.get('queue', []), map: LS.get('idmap', {}), running: false};
   async function mutate(action, payload) {
-    const r = await api.post(action, payload);
-    accept(r);
-    return r;
+    if (action === 'changePin') { const r = await api.post(action, payload); accept(r); return r; }
+    // An id from before the last sync may have been replaced by the Sheet's id
+    const known = (v) => S.data.expenses.some((e) => e.id === v) || S.data.categories.some((c) => c.id === v) || S.data.rules.some((r) => r.id === v);
+    const fix = (v) => (typeof v === 'string' && !known(v) && Q.map[v]) || v;
+    const p = {};
+    Object.entries(payload).forEach(([k, v]) => { p[k] = Array.isArray(v) ? v.map(fix) : fix(v); });
+    if (NEW_ID[action]) p._tmp = 'tmp' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+    const before = JSON.stringify(S.data);
+    let info;
+    try { info = applyAction(S.data, action, p, S.me); } catch (x) { S.data = JSON.parse(before); throw x; }
+    S.data.at = new Date().toISOString();
+    LS.set('data', S.data);
+    Q.jobs.push({action, payload: p}); LS.set('queue', Q.jobs);
+    flush();
+    return {info};
   }
+  const mapIds = (p) => {
+    const m = (v) => (typeof v === 'string' && Q.map[v]) || v;
+    const out = {};
+    Object.entries(p).forEach(([k, v]) => { if (k !== '_tmp') out[k] = Array.isArray(v) ? v.map(m) : m(v); });
+    return out;
+  };
+  async function flush() {
+    if (Q.running || !Q.jobs.length) return;
+    Q.running = true; renderSync();
+    let last = null;
+    while (Q.jobs.length) {
+      const job = Q.jobs[0];
+      try {
+        const r = await api.post(job.action, mapIds(job.payload));
+        if (job.payload._tmp && r.info && r.info.id) { Q.map[job.payload._tmp] = r.info.id; LS.set('idmap', Q.map); }
+        Q.jobs.shift(); LS.set('queue', Q.jobs); last = r;
+      } catch (x) {
+        if (x instanceof TypeError || !navigator.onLine) { Q.running = false; renderSync(); return; } // offline: try again later
+        Q.jobs.shift(); LS.set('queue', Q.jobs);
+        toast('Not saved: ' + x.message); last = null;
+        if (x.pin) { S.pin = ''; LS.del('pin'); render(); Q.running = false; return; }
+        Q.running = false; await refresh(true); return;
+      }
+    }
+    Q.running = false;
+    if (last && !Q.jobs.length) { swapIds(); accept(last); render(); }
+    renderSync();
+  }
+  // Replace temporary ids in anything still open (e.g. an edit sheet) with the Sheet's ids
+  function swapIds() { const sh = $('.sheet'); if (sh && sh.dataset.id && Q.map[sh.dataset.id]) sh.dataset.id = Q.map[sh.dataset.id]; }
+  function renderSync() { const el = $('.sync'); if (el) el.innerHTML = syncText(); }
+  const syncText = () => Q.jobs.length ? `<span class="spin"></span> Saving ${Q.jobs.length} change${Q.jobs.length === 1 ? '' : 's'}${navigator.onLine ? '' : ' when back online'}` : (S.busy ? '<span class="spin"></span> Syncing' : 'All saved · pull down or tap to refresh' + (S.data && S.data.at ? ' · ' + new Date(S.data.at).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'}) : ''));
+  window.addEventListener('online', () => flush());
   function accept(r) {
     const {ok, info, ...data} = r;
     data.at = data.at || new Date().toISOString();
     S.data = data; LS.set('data', data);
   }
   async function refresh(quiet) {
+    if (Q.jobs.length) return flush(); // local changes still on their way; don't overwrite them
     if (S.busy) return;
     S.busy = true; if (!quiet) render();
     try { accept(await api.load()); }
@@ -934,8 +1051,9 @@
     const el = ev.target.closest('[data-act]'); if (!el) return;
     const a = el.dataset.act;
     if (a === 'close') return closeSheet();
-    if (a === 'tab') { S.tab = el.dataset.tab; S.picking = false; S.picked = new Set(); render(); window.scrollTo(0, 0); return; }
+    if (a === 'tab') { if (S.tab !== el.dataset.tab) history.pushState({tab: el.dataset.tab}, ''); S.tab = el.dataset.tab; S.picking = false; S.picked = new Set(); render(); window.scrollTo(0, 0); return; }
     if (a === 'add') return expenseForm(null);
+    if (a === 'addin') return expenseForm(null, el.dataset.cat ? {category_id: el.dataset.cat, sub: el.dataset.sub || ''} : null);
     if (a === 'month') { const i = D.months.indexOf(S.month) + (+el.dataset.d); if (D.months[i]) { S.month = D.months[i]; render(); } return; }
     if (a === 'pickmonth') return monthPicker();
     if (a === 'pickstart') { S.picking = true; S.picked = new Set(); render(); return; }
@@ -946,8 +1064,8 @@
     if (a === 'openmonth') { S.month = el.dataset.m; S.hmode = 'month'; render(); window.scrollTo(0, 0); return; }
     if (a === 'setmonth') { S.month = el.dataset.m; if (el.dataset.close) closeSheet(); render(); return; }
     if (a === 'cat') return categorySheet(el.dataset.cat, el.dataset.m, el.dataset.ms ? el.dataset.ms.split(',') : null, el.dataset.sub);
-    if (a === 'edit') { closeSheet(true); return expenseForm(S.data.expenses.find((x) => x.id === el.dataset.id)); }
-    if (a === 'editpay') { closeSheet(true); return settleSheet(S.data.expenses.find((x) => x.id === el.dataset.id)); }
+    if (a === 'edit') return expenseForm(S.data.expenses.find((x) => x.id === el.dataset.id));
+    if (a === 'editpay') return settleSheet(S.data.expenses.find((x) => x.id === el.dataset.id));
     if (a === 'settle') return settleSheet(null);
     if (a === 'delexp') {
       const sh = $('.sheet'); const id = sh && sh.dataset.id;
@@ -991,6 +1109,12 @@
   });
   document.addEventListener('keydown', (ev) => { if (ev.key === 'Escape') closeSheet(); });
   document.addEventListener('click', (ev) => { if (ev.target.closest('.sync')) refresh(); });
+  // Installed iPhone app has no browser back gesture: swipe from the left edge to go back
+  if (navigator.standalone) {
+    let ex = null, ey = 0;
+    window.addEventListener('touchstart', (e) => { const t = e.touches[0]; ex = t.clientX < 28 && !$('.sheet') ? t.clientX : null; ey = t.clientY; }, {passive: true});
+    window.addEventListener('touchend', (e) => { if (ex == null) return; const t = e.changedTouches[0]; if (t.clientX - ex > 80 && Math.abs(t.clientY - ey) < 60) history.back(); ex = null; }, {passive: true});
+  }
   // pull to refresh
   let y0 = null;
   window.addEventListener('touchstart', (e) => { y0 = window.scrollY === 0 && !$('.sheet') ? e.touches[0].clientY : null; }, {passive: true});
@@ -998,7 +1122,8 @@
   document.addEventListener('visibilitychange', () => { if (!document.hidden && S.pin && S.data) refresh(true); });
 
   // ---------------- start ----------------
+  history.replaceState({tab: S.tab}, '');
   render();
-  if (S.pin && S.me) refresh(!!S.data);
+  if (S.pin && S.me) { if (Q.jobs.length) flush(); else refresh(!!S.data); }
   if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
 })();
