@@ -702,13 +702,14 @@
     });
   }
 
-  function categorySheet(cid, month, sel, initSub) {
+  function categorySheet(cid, month, sel, initSub, opts) {
     const c = cat(cid);
-    let scope = sel ? 'sel' : month || S.month;
+    opts = opts || {};
+    let scope = opts.scope || (sel ? 'sel' : month || S.month);
     const inScope = (m) => scope === 'all' || (scope === 'sel' ? sel.includes(m) : m === scope);
     // Months offered: the compared months, or every month with expenses (newest last)
     const ms = sel ? sel.slice().sort() : D.months.filter((m) => D.byMonth[m].count);
-    let subF = initSub === undefined ? null : initSub, picking = false; const picked = new Set();
+    let subF = initSub === undefined ? null : initSub, picking = !!opts.picking; const picked = new Set();
     const draw = (sh) => {
       const all = S.data.expenses.filter((e) => e.category_id === cid && e.type !== 'payment' && inScope(e.month || e.date.slice(0, 7))).sort((a, b) => b.date.localeCompare(a.date));
       const subT = {};
@@ -745,10 +746,15 @@
     const sh = openSheet(`${head(`${c.emoji} ${esc(c.name)}`)}<div id="c-body"></div><button class="fab" data-act="addin" data-cat="${esc(cid)}" aria-label="Add expense in ${esc(c.name)}">${I.plus}</button>`);
     sh.classList.add('tall');
     draw(sh);
+    if (opts.scroll) sh.scrollTop = opts.scroll;
     sh.addEventListener('click', (ev) => {
       const b = ev.target.closest('[data-scope],[data-subf],[data-pick],[data-pickid],[data-pickall],[data-pickcancel],[data-move]'); if (!b) return;
       if (b.dataset.pickid) return togglePick(picked, b, $('.pickdock', sh));
-      if (b.dataset.move) { const ids = [...picked]; return moveSheet(ids, null); }
+      if (b.dataset.move) {
+        // After moving, come back here, still selecting, at the same place in the list
+        const ids = [...picked], st = sh.scrollTop;
+        return moveSheet(ids, null, () => categorySheet(cid, month, sel, subF === null ? undefined : subF, {scope, picking: true, scroll: st}));
+      }
       if (b.dataset.pickall) { sh.querySelectorAll('[data-pickid]').forEach((r) => { picked.add(r.dataset.pickid); r.classList.add('sel'); }); return updateDock(picked, $('.pickdock', sh)); }
       if (b.dataset.scope) { scope = b.dataset.scope; subF = null; }
       else if (b.dataset.subf !== undefined) subF = b.dataset.subf === '__all' || subF === b.dataset.subf ? null : b.dataset.subf;
@@ -867,7 +873,7 @@
   }
   const dockHtml = (set) => `<div class="pickdock"><span class="dn">${set.size ? set.size + ' selected' : 'Tap expenses to select them'}</span><button class="btn ghost" data-pickcancel="1">Cancel</button><button class="btn" data-move="1" ${set.size ? '' : 'disabled'}>Move or group</button></div>`;
 
-  function moveSheet(ids, done) {
+  function moveSheet(ids, done, back) {
     const es = S.data.expenses.filter((e) => ids.includes(e.id));
     const curCats = [...new Set(es.map((e) => e.category_id))];
     let target = '';
@@ -884,6 +890,7 @@
       <div class="err" id="m-err"></div>
       <div class="actions"><button class="btn" id="m-go">Apply to ${es.length}</button></div>`);
     sh.classList.add('tall');
+    if (back) { const x = $('.x', sh); delete x.dataset.act; x.setAttribute('aria-label', 'Back'); x.addEventListener('click', back); }
     const subs = () => {
       const pool = target ? [target] : curCats;
       const n = {}; pool.forEach((cid) => subsOf(cid).forEach((s) => { n[s.sub] = (n[s.sub] || 0) + s.n; }));
@@ -901,7 +908,7 @@
       const btn = $('#m-go', sh); btn.disabled = true; btn.innerHTML = '<span class="spin"></span>';
       try {
         await mutate('bulkUpdate', payload);
-        closeSheet();
+        if (back) { render(); back(); } else closeSheet();
         toast(target ? `${ids.length} moved to ${cat(target).name}${sub ? ' › ' + sub : ''}` : sub ? `${ids.length} grouped under ${sub}` : `Subcategory removed from ${ids.length}`);
         if (done) done();
         render();
@@ -1046,7 +1053,7 @@
     if (S.tab === 'list' && S.picking && !ev.target.closest('.sheet')) {
       const r = ev.target.closest('[data-pickid]'); if (r) return togglePick(S.picked, r, $('#app .pickdock'));
       if (ev.target.closest('[data-pickcancel]')) { S.picking = false; S.picked = new Set(); render(); return; }
-      if (ev.target.closest('[data-move]')) return moveSheet([...S.picked], () => { S.picking = false; S.picked = new Set(); });
+      if (ev.target.closest('[data-move]')) return moveSheet([...S.picked], () => { S.picked = new Set(); }); // stay in select mode to keep grouping
     }
     const el = ev.target.closest('[data-act]'); if (!el) return;
     const a = el.dataset.act;
