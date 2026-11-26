@@ -316,3 +316,10 @@ button { cursor: pointer; }
 .catq { margin-bottom: 8px; }
 .catq input { padding: 11px 0; }
 .sugg b { font-weight: 600; }
+
+/* tappable figures */
+button.cash-l { width: 100%; border: 0; background: none; padding: 6px 0; text-align: left; font: inherit; font-size: 13px; color: var(--muted); border-radius: 8px; }
+button.cash-l:active { background: var(--sunk); }
+.cmp td.tapcell { cursor: pointer; text-decoration: underline dotted var(--line); text-underline-offset: 4px; }
+.cmp td.tapcell:active { background: var(--sunk); }
+.newcat { background: var(--surface) !important; border: 1px dashed var(--cedar) !important; color: var(--cedar) !important; font-weight: 600; }

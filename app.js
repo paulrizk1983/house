@@ -18,6 +18,7 @@
     xq: '', xMonth: 'month', xCat: '', xWho: '',
     busy: false,
     picking: false, picked: new Set(),
+    stack: [], mainY: 0, reopening: false,
   };
   let D = null; // derived
 
@@ -187,18 +188,19 @@
   const meBtn = () => `<span class="topr"><button class="iconbtn" data-act="search" aria-label="Search expenses">${I.search}</button><button class="me ${S.me}" data-act="tab" data-tab="settings" aria-label="Settings">${S.me[0]}</button></span>`;
 
   // Cash out vs own expenses, per person
-  function cashCard(b, title) {
+  function cashCard(b, title, ms) {
+    const at = `data-ms="${(ms || []).join(',')}"`;
     const max = Math.max(1, b.grace_paid, b.paul_paid, b.grace_share, b.paul_share);
     const person = (p) => {
       const k = p.toLowerCase(), paid = b[k + '_paid'], share = b[k + '_share'], diff = r2(paid - share);
       const line = Math.abs(diff) < .005 ? 'Paid exactly their own share' : diff > 0 ? `Paid ${money(diff)} more than ${p === 'Paul' ? 'his' : 'her'} share` : `Paid ${money(-diff)} less than ${p === 'Paul' ? 'his' : 'her'} share`;
       return `<div class="cash-p">
         <div class="cash-h"><span class="me ${p}" aria-hidden="true">${p[0]}</span><b>${p}</b><span class="cash-d ${diff > .005 ? 'over' : diff < -.005 ? 'under' : ''}">${line}</span></div>
-        <div class="cash-l"><span>Cash out</span><div class="cash-t"><i class="${p}" style="width:${(paid / max * 100).toFixed(1)}%"></i></div><span class="num">${money(paid)}</span></div>
-        <div class="cash-l"><span>Own expenses</span><div class="cash-t"><i class="${p} soft" style="width:${(share / max * 100).toFixed(1)}%"></i></div><span class="num">${money(share)}</span></div>
+        <button class="cash-l" data-act="person" data-p="${p}" data-k="paid" ${at}><span>Cash out</span><div class="cash-t"><i class="${p}" style="width:${(paid / max * 100).toFixed(1)}%"></i></div><span class="num">${money(paid)} ›</span></button>
+        <button class="cash-l" data-act="person" data-p="${p}" data-k="share" ${at}><span>Own expenses</span><div class="cash-t"><i class="${p} soft" style="width:${(share / max * 100).toFixed(1)}%"></i></div><span class="num">${money(share)} ›</span></button>
       </div>`;
     };
-    return `<section class="card" id="cash"><h2>${title}</h2><p class="sub">Cash out is what each of you paid. Own expenses is each person’s share, whoever paid.</p>${person('Paul')}${person('Grace')}</section>`;
+    return `<section class="card" id="cash"><h2>${title}</h2><p class="sub">Cash out is what each of you paid. Own expenses is each person’s share, whoever paid. Tap a line for the details.</p>${person('Paul')}${person('Grace')}</section>`;
   }
 
   function balanceCard(b) {
@@ -237,7 +239,7 @@
         <div class="big num">$${whole.toLocaleString('en-US')}${cents ? `<small>.${pad(cents)}</small>` : ''}</div>
         ${delta}
       </section>
-      ${cashCard(b, 'Cash out vs own expenses')}
+      ${cashCard(b, 'Cash out vs own expenses', [m])}
       <section class="card">
         <h2>Where it went</h2>
         <p class="sub">Tap a category to see every expense in it.</p>
@@ -265,7 +267,9 @@
     const last = ms[ms.length - 1], before = ms[ms.length - 2];
     const chg = (a, b) => (b ? (a - b >= 0 ? '+' : '−') + moneyShort(Math.abs(a - b)) : '');
     const cell = (v, strong) => `<td class="num${strong ? ' strong' : ''}">${v ? money(Math.round(v)) : '·'}</td>`;
-    const line = (label, k, cls) => `<tr class="${cls || ''}"><th scope="row">${label}</th>${ms.map((m) => cell(D.byMonth[m][k], cls === 'total')).join('')}${before ? `<td class="num chg">${chg(D.byMonth[last][k], D.byMonth[before][k])}</td>` : ''}</tr>`;
+    const PK = {total: ['both', 'total'], paul_paid: ['Paul', 'paid'], paul_share: ['Paul', 'share'], grace_paid: ['Grace', 'paid'], grace_share: ['Grace', 'share']};
+    const tap = (k, m, v) => `<td class="num tapcell${k === 'total' ? ' strong' : ''}" data-act="person" data-p="${PK[k][0]}" data-k="${PK[k][1]}" data-ms="${m}">${v ? money(Math.round(v)) : '·'}</td>`;
+    const line = (label, k, cls) => `<tr class="${cls || ''}"><th scope="row">${label}</th>${ms.map((m) => tap(k, m, D.byMonth[m][k])).join('')}${before ? `<td class="num chg">${chg(D.byMonth[last][k], D.byMonth[before][k])}</td>` : ''}</tr>`;
     const combined = {grace_paid: sum('grace_paid'), paul_paid: sum('paul_paid'), grace_share: sum('grace_share'), paul_share: sum('paul_share')};
     return `
       <div class="top"><h1>Compare months</h1>${meBtn()}</div>
@@ -295,7 +299,7 @@
               return `<tr class="crow-t" data-act="cat" data-cat="${esc(cid)}" data-ms="${ms.join(',')}"><th scope="row"><span class="cdot" style="background:${c.color}"></span>${c.emoji} ${esc(c.name)}</th>${ms.map((m) => cell(v(m))).join('')}${before ? `<td class="num chg ${v(last) > v(before) ? 'up' : v(last) < v(before) ? 'down' : ''}">${chg(v(last), v(before))}</td>` : ''}</tr>`; }).join('')}
           </tbody></table></div>
       </section>
-      ${cashCard(combined, ms.length > 1 ? `Cash out vs own expenses · ${ms.length} months` : 'Cash out vs own expenses')}`
+      ${cashCard(combined, ms.length > 1 ? `Cash out vs own expenses · ${ms.length} months` : 'Cash out vs own expenses', ms)}`
       : '<div class="empty"><b>No months picked</b>Tap the months above to compare them.</div>'}
       ${balanceCard(null)}
       ${syncLine()}`;
@@ -330,7 +334,7 @@
     return `
       <div class="top"><h1>Expenses</h1>${meBtn()}</div>
       <label class="search">${I.search}<input type="search" placeholder="Search name, category, note or amount" value="${esc(S.xq)}" data-input="xq" aria-label="Search expenses"></label>
-      ${S.xq.trim() ? '<div class="hint">Searching every month</div>' : ''}
+      ${S.xq.trim() ? '<div class="hint">Searching every month</div>' + catMatches(S.xq.trim().toLowerCase()) : ''}
       <div class="chips">
         <button class="chip ${S.xMonth === 'month' && !S.xq.trim() ? 'on' : ''}" data-act="xmonth" data-v="month">${mLong(S.month)}</button>
         <button class="chip ${S.xMonth === 'all' || S.xq.trim() ? 'on' : ''}" data-act="xmonth" data-v="all">All time</button>
@@ -447,7 +451,7 @@
       <div class="top"><h1>Settings</h1>${meBtn()}</div>
       <div class="section-t">This phone belongs to</div>
       <div class="whoami">${['Paul', 'Grace'].map((p) => `<button class="${S.me === p ? 'on' : ''}" data-act="setme" data-v="${p}"><span class="me ${p}">${p[0]}</span>${p}</button>`).join('')}</div>
-      <div class="section-t">Categories · rename one and every past expense follows</div>
+      <div class="section-t">Categories · tap one to rename or delete it</div>
       <div class="list">
         ${cats.map((c) => `<button data-act="editcat" data-id="${c.id}"><span class="ico" style="background:${tint(c.color, .16)}">${c.emoji}</span><span class="grow">${esc(c.name)}<small>${D.usage[c.id] || 0} expenses</small></span><span class="chev">${I.right}</span></button>`).join('')}
         <button data-act="newcat"><span class="ico" style="background:var(--sunk)">＋</span><span class="grow">Add a category</span></button>
@@ -483,15 +487,21 @@
   }
 
   // ---------------- sheets ----------------
+  // Opening a panel from another panel remembers the first one (and where you were in it),
+  // so Back returns there. Opening from a screen remembers the screen's scroll position.
   function openSheet(html, onMount) {
-    const had = !!$('.sheet');
+    const cur = $('.sheet');
+    if (!S.reopening) {
+      if (!cur) { S.mainY = window.scrollY; S.stack = []; history.pushState({tab: S.tab, sheet: 1}, ''); }
+      else if (cur._snap) { S.stack.push({snap: cur._snap(), y: cur.scrollTop}); history.pushState({tab: S.tab, sheet: 1, depth: S.stack.length}, ''); }
+    }
     removeSheet();
-    if (!had) history.pushState({tab: S.tab, sheet: 1}, '');
     const scrim = document.createElement('div'); scrim.className = 'scrim'; scrim.dataset.act = 'close';
     const sh = document.createElement('div'); sh.className = 'sheet'; sh.setAttribute('role', 'dialog'); sh.setAttribute('aria-modal', 'true');
     sh.innerHTML = '<div class="grab"></div>' + html;
     document.body.append(scrim, sh);
-    requestAnimationFrame(() => { scrim.classList.add('open'); sh.classList.add('open'); });
+    if (S.reopening) { scrim.classList.add('open'); sh.classList.add('open'); }
+    else requestAnimationFrame(() => { scrim.classList.add('open'); sh.classList.add('open'); });
     document.body.style.overflow = 'hidden';
     dragToClose(sh);
     if (onMount) onMount(sh);
@@ -506,14 +516,26 @@
   function animateClose() {
     const sh = $('.sheet'), sc = $('.scrim');
     if (!sh) return;
+    S.stack = [];
     document.body.style.overflow = '';
+    window.scrollTo(0, S.mainY);
     sh.style.transform = ''; sh.classList.remove('open'); sc && sc.classList.remove('open');
     setTimeout(() => { sh.remove(); sc && sc.remove(); }, 260);
   }
+  if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
   window.addEventListener('popstate', (ev) => {
-    if ($('.sheet')) { animateClose(); return; }
+    if ($('.sheet')) {
+      if (S.stack.length) { // back to the previous panel, same place
+        const it = S.stack.pop();
+        S.reopening = true; removeSheet(); const sh = it.snap(it.after); S.reopening = false;
+        document.body.style.overflow = 'hidden';
+        if (sh) requestAnimationFrame(() => { sh.scrollTop = it.y; });
+      } else animateClose();
+      return;
+    }
     const t = (ev.state && ev.state.tab) || 'home';
-    if (t !== S.tab) { S.tab = t; S.picking = false; S.picked = new Set(); render(); window.scrollTo(0, 0); }
+    if (t !== S.tab) { S.tab = t; S.picking = false; S.picked = new Set(); render(); }
+    window.scrollTo(0, (ev.state && ev.state.y) || 0);
   });
   // Pull a sheet down (from its top) or swipe it to the right to close it
   function dragToClose(sh) {
@@ -710,6 +732,10 @@
     // Months offered: the compared months, or every month with expenses (newest last)
     const ms = sel ? sel.slice().sort() : D.months.filter((m) => D.byMonth[m].count);
     let subF = initSub === undefined ? null : initSub, picking = !!opts.picking; const picked = new Set();
+    if (opts.afterGroup) { // show what is still without a subcategory, if anything
+      const left = S.data.expenses.some((e) => e.category_id === cid && e.type !== 'payment' && !e.sub && inScope(e.month || e.date.slice(0, 7)));
+      subF = left ? '' : null;
+    }
     const draw = (sh) => {
       const all = S.data.expenses.filter((e) => e.category_id === cid && e.type !== 'payment' && inScope(e.month || e.date.slice(0, 7))).sort((a, b) => b.date.localeCompare(a.date));
       const subT = {};
@@ -746,15 +772,11 @@
     const sh = openSheet(`${head(`${c.emoji} ${esc(c.name)}`)}<div id="c-body"></div><button class="fab" data-act="addin" data-cat="${esc(cid)}" aria-label="Add expense in ${esc(c.name)}">${I.plus}</button>`);
     sh.classList.add('tall');
     draw(sh);
-    if (opts.scroll) sh.scrollTop = opts.scroll;
+    sh._snap = () => { const st = {scope, subF, picking}; return (after) => categorySheet(cid, month, sel, after ? undefined : (st.subF === null ? undefined : st.subF), {scope: st.scope, picking: after || st.picking, afterGroup: after}); };
     sh.addEventListener('click', (ev) => {
       const b = ev.target.closest('[data-scope],[data-subf],[data-pick],[data-pickid],[data-pickall],[data-pickcancel],[data-move]'); if (!b) return;
       if (b.dataset.pickid) return togglePick(picked, b, $('.pickdock', sh));
-      if (b.dataset.move) {
-        // After moving, come back here, still selecting, at the same place in the list
-        const ids = [...picked], st = sh.scrollTop;
-        return moveSheet(ids, null, () => categorySheet(cid, month, sel, subF === null ? undefined : subF, {scope, picking: true, scroll: st}));
-      }
+      if (b.dataset.move) return moveSheet([...picked], null);
       if (b.dataset.pickall) { sh.querySelectorAll('[data-pickid]').forEach((r) => { picked.add(r.dataset.pickid); r.classList.add('sel'); }); return updateDock(picked, $('.pickdock', sh)); }
       if (b.dataset.scope) { scope = b.dataset.scope; subF = null; }
       else if (b.dataset.subf !== undefined) subF = b.dataset.subf === '__all' || subF === b.dataset.subf ? null : b.dataset.subf;
@@ -763,6 +785,7 @@
       const fab = $('.fab', sh); if (fab) fab.dataset.sub = subF || ''; // + adds into the subcategory in view
       redraw();
     });
+    return sh;
   }
 
   const EMOJIS = ['🛒', '🍽️', '⛽', '🏠', '✈️', '⚖️', '🛋️', '🤝', '💆', '🧸', '🚗', '🩺', '🧴', '🧹', '⚡', '🎁', '💡', '👕', '📱', '📦', '🎬', '🔁', '📚', '🏷️', '☕', '🍷', '🐾', '💊', '🏋️', '🎓', '🧾', '💳', '🌿', '🛠️', '🎉', '👶'];
@@ -783,10 +806,12 @@
       <div class="actions"><button class="btn" id="k-save">${isNew ? 'Add category' : 'Save'}</button></div>
       ${isNew || !subsOf(c.id).length ? '' : `<div class="section-t">Subcategories · rename one and its past expenses follow</div>
         <div class="list">${subsOf(c.id).map((s) => `<div><input class="subname" data-old="${esc(s.sub)}" value="${esc(s.sub)}" aria-label="Subcategory name"><small style="color:var(--muted)">${s.n}</small><button class="btn ghost" data-rensub="${esc(s.sub)}">Rename</button></div>`).join('')}</div>`}
-      ${isNew ? '' : `<div class="section-t">Merge into another category</div>
-        <p class="sub" style="margin:0 4px 10px">Moves every ${esc(c.name)} expense into the one you pick, then removes ${esc(c.name)}.</p>
-        <div class="field"><select id="k-merge"><option value="">Choose a category…</option>${others.map((o) => `<option value="${o.id}">${o.emoji} ${esc(o.name)}</option>`).join('')}</select></div>
-        <div class="actions"><button class="btn ghost" id="k-merge-go">Merge</button></div>`}`);
+      ${isNew ? '' : (D.usage[c.id] || 0) ? `<div class="section-t">Delete this category</div>
+        <p class="sub" style="margin:0 4px 10px">It has ${D.usage[c.id]} expense${D.usage[c.id] === 1 ? '' : 's'}. Choose where they go, then ${esc(c.name)} is removed. Its subcategories move with them.</p>
+        <div class="field"><select id="k-merge"><option value="">Move its expenses to…</option>${others.map((o) => `<option value="${o.id}">${o.emoji} ${esc(o.name)}</option>`).join('')}</select></div>
+        <div class="actions"><button class="btn danger" id="k-merge-go">Move expenses and delete</button></div>`
+        : `<div class="section-t">Delete this category</div><p class="sub" style="margin:0 4px 10px">It has no expenses, so nothing else changes.</p>
+        <div class="actions"><button class="btn danger" id="k-del">Delete ${esc(c.name)}</button></div>`}`);
     $('#k-emo', sh).addEventListener('click', (ev) => { const b = ev.target.closest('button'); if (b) { f.emoji = b.textContent; sh.querySelectorAll('#k-emo button').forEach((x) => x.classList.toggle('on', x === b)); } });
     $('#k-col', sh).addEventListener('click', (ev) => { const b = ev.target.closest('button'); if (b) { f.color = b.dataset.c; sh.querySelectorAll('#k-col button').forEach((x) => x.classList.toggle('on', x === b)); } });
     $('#k-save', sh).addEventListener('click', async () => {
@@ -801,11 +826,20 @@
       try { const r = await mutate('renameSub', {category_id: c.id, from, to}); toast(to ? `Renamed · ${moved(r).replace('moved', 'updated')}` : 'Subcategory removed'); closeSheet(); render(); }
       catch (x) { $('#k-err', sh).textContent = x.message; }
     }));
+    // Delete: rules pointing at it are removed (with expenses: they follow to the new category)
+    const dropRules = async (to) => { for (const r of S.data.rules.filter((x) => x.category_id === c.id)) await mutate('deleteRule', {id: r.id}); };
     const mg = $('#k-merge-go', sh);
     if (mg) mg.addEventListener('click', async () => {
       const to = $('#k-merge', sh).value;
-      if (!to) { $('#k-err', sh).textContent = 'Choose the category to merge into.'; return; }
-      try { const r = await mutate('mergeCategory', {from: c.id, to}); closeSheet(); toast(`Merged · ${moved(r)}`); render(); }
+      if (!to) { $('#k-err', sh).textContent = 'Choose where its expenses should go.'; return; }
+      if (mg.dataset.confirm !== '1') { mg.dataset.confirm = '1'; mg.textContent = `Tap again: move to ${cat(to).name} and delete`; return; }
+      try { await dropRules(to); const r = await mutate('mergeCategory', {from: c.id, to}); closeSheet(); toast(`${c.name} deleted · ${moved(r)} to ${cat(to).name}`); render(); }
+      catch (x) { $('#k-err', sh).textContent = x.message; }
+    });
+    const del = $('#k-del', sh);
+    if (del) del.addEventListener('click', async () => {
+      if (del.dataset.confirm !== '1') { del.dataset.confirm = '1'; del.textContent = 'Tap again to delete'; return; }
+      try { await dropRules(); await mutate('updateCategory', {id: c.id, archived: true}); closeSheet(); toast(`${c.name} deleted`); render(); }
       catch (x) { $('#k-err', sh).textContent = x.message; }
     });
   }
@@ -848,9 +882,23 @@
       // subcategories from any category
       const found = [];
       if (q) S.data.categories.filter((c) => !c.archived).forEach((c) => subsOf(c.id).forEach((s) => { if (s.sub.toLowerCase().includes(q)) found.push({c, sub: s.sub}); }));
+      const exact = S.data.categories.some((c) => !c.archived && c.name.toLowerCase() === q);
       hits.innerHTML = found.slice(0, 8).map((x) => `<button type="button" data-cat="${x.c.id}" data-sub="${esc(x.sub)}">${x.c.emoji} ${esc(x.c.name)} › <b>${esc(x.sub)}</b></button>`).join('')
-        + (q && !found.length && !grid.querySelector('button:not([hidden])') ? '<span class="hint">No match. Add a category in Settings.</span>' : '');
+        + (q && !exact ? `<button type="button" class="newcat" data-new="1">＋ New category “${esc(inp.value.trim())}”</button>` : '');
     });
+    hits.addEventListener('click', async (ev) => {
+      const b = ev.target.closest('[data-new]'); if (!b) return;
+      ev.stopImmediatePropagation();
+      const name = inp.value.trim(); if (!name) return;
+      const used = new Set(S.data.categories.filter((c) => !c.archived).map((c) => c.color));
+      const color = COLORS.find((x) => !used.has(x)) || COLORS[S.data.categories.length % COLORS.length];
+      try {
+        const r = await mutate('addCategory', {name, emoji: '🏷️', color});
+        const btn = document.createElement('button'); btn.type = 'button'; btn.dataset.cat = r.info.id; btn.dataset.name = name.toLowerCase();
+        btn.innerHTML = `<span class="e">🏷️</span><span>${esc(name)}</span>`; grid.prepend(btn);
+        onPick(r.info.id); done(); toast(`Category “${name}” added`);
+      } catch (x) { toast(x.message); }
+    }, true);
     const done = () => { inp.value = ''; inp.dispatchEvent(new Event('input')); };
     hits.addEventListener('click', (ev) => { const b = ev.target.closest('button'); if (b) { onPick(b.dataset.cat, b.dataset.sub); done(); } });
     grid.addEventListener('click', (ev) => { if (inp.value && ev.target.closest('button')) setTimeout(done, 0); });
@@ -873,7 +921,7 @@
   }
   const dockHtml = (set) => `<div class="pickdock"><span class="dn">${set.size ? set.size + ' selected' : 'Tap expenses to select them'}</span><button class="btn ghost" data-pickcancel="1">Cancel</button><button class="btn" data-move="1" ${set.size ? '' : 'disabled'}>Move or group</button></div>`;
 
-  function moveSheet(ids, done, back) {
+  function moveSheet(ids, done) {
     const es = S.data.expenses.filter((e) => ids.includes(e.id));
     const curCats = [...new Set(es.map((e) => e.category_id))];
     let target = '';
@@ -890,7 +938,6 @@
       <div class="err" id="m-err"></div>
       <div class="actions"><button class="btn" id="m-go">Apply to ${es.length}</button></div>`);
     sh.classList.add('tall');
-    if (back) { const x = $('.x', sh); delete x.dataset.act; x.setAttribute('aria-label', 'Back'); x.addEventListener('click', back); }
     const subs = () => {
       const pool = target ? [target] : curCats;
       const n = {}; pool.forEach((cid) => subsOf(cid).forEach((s) => { n[s.sub] = (n[s.sub] || 0) + s.n; }));
@@ -908,7 +955,8 @@
       const btn = $('#m-go', sh); btn.disabled = true; btn.innerHTML = '<span class="spin"></span>';
       try {
         await mutate('bulkUpdate', payload);
-        if (back) { render(); back(); } else closeSheet();
+        if (S.stack.length) S.stack[S.stack.length - 1].after = true; // the category reopens on what's left to group
+        closeSheet();
         toast(target ? `${ids.length} moved to ${cat(target).name}${sub ? ' › ' + sub : ''}` : sub ? `${ids.length} grouped under ${sub}` : `Subcategory removed from ${ids.length}`);
         if (done) done();
         render();
@@ -916,8 +964,8 @@
     });
   }
 
-  function searchSheet() {
-    const sh = openSheet(`${head('Search')}<label class="search">${I.search}<input type="search" id="q-in" placeholder="Name, category, note, amount or date" autocomplete="off" aria-label="Search all expenses"></label><div id="q-out"></div><button class="fab" data-act="addin" aria-label="Add expense">${I.plus}</button>`);
+  function searchSheet(q0) {
+    const sh = openSheet(`${head('Search')}<label class="search">${I.search}<input type="search" id="q-in" placeholder="Name, category, note, amount or date" autocomplete="off" aria-label="Search all expenses" value="${esc(q0 || '')}"></label><div id="q-out"></div><button class="fab" data-act="addin" aria-label="Add expense">${I.plus}</button>`);
     sh.classList.add('tall');
     const inp = $('#q-in', sh), out = $('#q-out', sh);
     const run = () => {
@@ -925,7 +973,18 @@
       if (!q) { out.innerHTML = '<div class="empty">Type a word or amount. Searches every month.</div>'; return; }
       const hits = S.data.expenses.filter((e) => matches(e, q)).sort((a, b) => b.date.localeCompare(a.date));
       const tot = hits.filter((e) => e.type !== 'payment').reduce((s, e) => s + e.amount, 0);
-      // Categories and subcategories whose name matches, with their all-time totals
+      const groupsHtml = catMatches(q);
+      out.innerHTML = (hits.length || groupsHtml) ? `${groupsHtml}${hits.length ? `<div class="day"><span>${hits.length} expense${hits.length === 1 ? '' : 's'}</span><span class="num">${money(tot)}</span></div>` : ''}<div class="group">${hits.slice(0, 200).map((e) => xrow(e).replace('<div class="m">', `<div class="m"><span class="when">${dayLabel(e.date)}${e.date.slice(0, 4) !== todayISO().slice(0, 4) ? ' ' + e.date.slice(0, 4) : ''}</span>`)).join('')}</div>`
+        : `<div class="empty"><b>Nothing matches “${esc(inp.value.trim())}”</b>Try part of the name, e.g. “spinn”.</div>`;
+    };
+    inp.addEventListener('input', run); run();
+    if (!q0) setTimeout(() => inp.focus(), 250);
+    sh._snap = () => { const q = inp.value; return () => searchSheet(q); };
+    return sh;
+  }
+
+  // Categories and subcategories whose name matches, with their all-time totals
+  function catMatches(q) {
       const spend = S.data.expenses.filter((e) => e.type !== 'payment');
       const catHits = S.data.categories.filter((c) => !c.archived && c.name.toLowerCase().includes(q)).map((c) => {
         const es = spend.filter((e) => e.category_id === c.id); return {c, n: es.length, t: es.reduce((s, e) => s + e.amount, 0)};
@@ -937,12 +996,40 @@
         ...catHits.map((x) => `<button class="xrow" data-act="cat" data-cat="${esc(x.c.id)}" data-m="all"><span class="ico" style="background:${tint(x.c.color, .16)}">${x.c.emoji}</span><span style="min-width:0"><div class="t">${esc(x.c.name)}</div><div class="m"><span>Category · ${x.n} expense${x.n === 1 ? '' : 's'}</span></div></span><span><div class="a num">${money(x.t)}</div><div class="s">all time ›</div></span></button>`),
         ...subHits.map((x) => { const c = cat(x.cid); return `<button class="xrow" data-act="cat" data-cat="${esc(x.cid)}" data-m="all" data-sub="${esc(x.sub)}"><span class="ico" style="background:${tint(c.color, .16)}">${c.emoji}</span><span style="min-width:0"><div class="t">${esc(x.sub)}</div><div class="m"><span>Subcategory of ${esc(c.name)} · ${x.n}</span></div></span><span><div class="a num">${money(x.t)}</div><div class="s">all time ›</div></span></button>`; }),
       ];
-      const groupsHtml = groupRows.length ? `<div class="day"><span>Categories</span></div><div class="group">${groupRows.join('')}</div>` : '';
-      out.innerHTML = (hits.length || groupRows.length) ? `${groupsHtml}${hits.length ? `<div class="day"><span>${hits.length} expense${hits.length === 1 ? '' : 's'}</span><span class="num">${money(tot)}</span></div>` : ''}<div class="group">${hits.slice(0, 200).map((e) => xrow(e).replace('<div class="m">', `<div class="m"><span class="when">${dayLabel(e.date)}${e.date.slice(0, 4) !== todayISO().slice(0, 4) ? ' ' + e.date.slice(0, 4) : ''}</span>`)).join('')}</div>`
-        : `<div class="empty"><b>Nothing matches “${esc(inp.value.trim())}”</b>Try part of the name, e.g. “spinn”.</div>`;
+      return groupRows.length ? `<div class="day"><span>Categories</span></div><div class="group">${groupRows.join('')}</div>` : '';
+  }
+
+  // Details behind a cash-out / own-expenses / total figure
+  function personSheet(person, kind, months) {
+    const ms = months.length ? months : D.months;
+    const label = ms.length === 1 ? mLong(ms[0]) : ms.length === D.months.length && !months.length ? 'All time' : mShort(ms[0]) + '–' + mShort(ms[ms.length - 1]);
+    const inM = (e) => ms.includes(e.month || e.date.slice(0, 7));
+    const k = person === 'both' ? null : person.toLowerCase() + '_share';
+    const es = S.data.expenses.filter((e) => e.type !== 'payment' && inM(e) && (
+      kind === 'total' ? true : kind === 'paid' ? e.paid_by === person : e[k] > 0)).sort((a, b) => b.date.localeCompare(a.date));
+    const val = (e) => kind === 'share' ? e[k] : e.amount;
+    const tot = es.reduce((s, e) => s + val(e), 0);
+    const byCat = {}; es.forEach((e) => { byCat[e.category_id] = (byCat[e.category_id] || 0) + val(e); });
+    const cats = Object.entries(byCat).sort((a, b) => b[1] - a[1]);
+    const title = kind === 'total' ? 'Total spent' : `${person} · ${kind === 'paid' ? 'Cash out' : 'Own expenses'}`;
+    const note = kind === 'paid' ? `Everything ${person} paid for, whoever it was for.` : kind === 'share' ? `${person}’s part of each expense, whoever paid it.` : 'Every expense in this period.';
+    const row = (e) => {
+      const c = cat(e.category_id);
+      const meta = kind === 'share' ? (e.paid_by === person ? `${person} paid` : `${e.paid_by} paid`) + ` · of ${money(e.amount)}` : kind === 'paid' ? (e.grace_share && e.paul_share ? `${person}’s part ${money(e[person.toLowerCase() + '_share'])}` : e[person.toLowerCase() + '_share'] ? `all ${person}’s` : `all ${other(person)}’s`) : `${e.paid_by} paid`;
+      return `<button class="xrow" data-act="edit" data-id="${esc(e.id)}"><span class="ico" style="background:${tint(c.color, .16)}">${c.emoji}</span><span style="min-width:0"><div class="t">${esc(e.title)}</div><div class="m"><span class="when">${dayLabel(e.date)}</span><span>${catLabel(e)}</span></div></span><span><div class="a num">${money(val(e))}</div><div class="s">${meta}</div></span></button>`;
     };
-    inp.addEventListener('input', run); run();
-    setTimeout(() => inp.focus(), 250);
+    const swap = person === 'both' ? '' : `<div class="chips">
+      <button class="chip ${kind === 'paid' ? 'on' : ''}" data-ps="${person}|paid">Cash out</button><button class="chip ${kind === 'share' ? 'on' : ''}" data-ps="${person}|share">Own expenses</button>
+      <button class="chip" data-ps="${other(person)}|${kind}"><span class="dot ${other(person)}"></span>Switch to ${other(person)}</button></div>`;
+    const sh = openSheet(`${head(title)}${swap}
+      <div class="hero" style="margin:4px 2px 12px"><div class="cap">${label}</div><div class="big num" style="font-size:40px">${money(tot)}</div><div class="delta">${es.length} expense${es.length === 1 ? '' : 's'} · ${note}</div></div>
+      ${cats.length ? `<div class="lbl"><span>By category</span></div><div class="subs">${cats.slice(0, 8).map(([cid, v]) => `<button class="subrow" data-act="cat" data-cat="${esc(cid)}" ${ms.length === 1 ? `data-m="${ms[0]}"` : `data-ms="${ms.join(',')}"`}><span class="sn">${cat(cid).emoji} ${esc(cat(cid).name)}</span><span class="sb"><i style="width:${(v / cats[0][1] * 100).toFixed(1)}%;background:${cat(cid).color}"></i></span><span class="num">${money(v)}</span></button>`).join('')}</div>` : ''}
+      <div class="lbl"><span>Expenses</span></div>
+      <div class="group">${es.map(row).join('') || '<div class="empty" style="background:var(--surface)">Nothing in this period.</div>'}</div>`);
+    sh.classList.add('tall');
+    sh.addEventListener('click', (ev) => { const b = ev.target.closest('[data-ps]'); if (!b) return; const [p2, k2] = b.dataset.ps.split('|'); S.reopening = true; removeSheet(); personSheet(p2, k2, months); S.reopening = false; document.body.style.overflow = 'hidden'; });
+    sh._snap = () => () => personSheet(person, kind, months);
+    return sh;
   }
 
   function pinSheet() {
@@ -1058,8 +1145,9 @@
     const el = ev.target.closest('[data-act]'); if (!el) return;
     const a = el.dataset.act;
     if (a === 'close') return closeSheet();
-    if (a === 'tab') { if (S.tab !== el.dataset.tab) history.pushState({tab: el.dataset.tab}, ''); S.tab = el.dataset.tab; S.picking = false; S.picked = new Set(); render(); window.scrollTo(0, 0); return; }
+    if (a === 'tab') { if (S.tab !== el.dataset.tab) { history.replaceState({...(history.state || {}), tab: S.tab, y: window.scrollY}, ''); history.pushState({tab: el.dataset.tab}, ''); } S.tab = el.dataset.tab; S.picking = false; S.picked = new Set(); render(); window.scrollTo(0, 0); return; }
     if (a === 'add') return expenseForm(null);
+    if (a === 'person') return personSheet(el.dataset.p, el.dataset.k, (el.dataset.ms || '').split(',').filter(Boolean));
     if (a === 'addin') return expenseForm(null, el.dataset.cat ? {category_id: el.dataset.cat, sub: el.dataset.sub || ''} : null);
     if (a === 'month') { const i = D.months.indexOf(S.month) + (+el.dataset.d); if (D.months[i]) { S.month = D.months[i]; render(); } return; }
     if (a === 'pickmonth') return monthPicker();

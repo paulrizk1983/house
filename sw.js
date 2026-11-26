@@ -1,6 +1,6 @@
 // Keeps the app shell available offline. Data always comes fresh from the Google Sheet.
-const CACHE = 'house-v5';
-const SHELL = ['./', 'index.html', 'app.css?v=5', 'app.js?v=5', 'config.js?v=5', 'manifest.webmanifest', 'icon-192.png'];
+const CACHE = 'house-v6';
+const SHELL = ['./', 'index.html', 'app.css?v=6', 'app.js?v=6', 'config.js?v=6', 'manifest.webmanifest', 'icon-192.png'];
 self.addEventListener('install', (e) => { e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL))); self.skipWaiting(); });
 self.addEventListener('activate', (e) => { e.waitUntil(caches.keys().then((ks) => Promise.all(ks.filter((k) => k !== CACHE).map((k) => caches.delete(k))))); self.clients.claim(); });
 self.addEventListener('fetch', (e) => {
